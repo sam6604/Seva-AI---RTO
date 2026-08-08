@@ -22,5 +22,9 @@
   {"id": "vr-hi-1", "service_id": "vehicle_registration", "category": "service_specific", "question_hi": "Naye vehicle ka registration kaise karwayein?", "expects_insufficient": true},
 
   {"id": "oos-1", "service_id": null, "category": "out_of_scope", "question_en": "What's the weather like today?", "expects_out_of_scope": true},
-  {"id": "oos-2", "service_id": null, "category": "out_of_scope", "question_en": "Can you recommend a good biryani recipe?", "expects_out_of_scope": true}
+  {"id": "oos-2", "service_id": null, "category": "out_of_scope", "question_en": "Can you recommend a good biryani recipe?", "expects_out_of_scope": true},
+
+  {"id": "dl-portal-1", "service_id": "driving_license", "category": "official_link", "question_en": "Where can I apply for a driving license online?", "expected_keywords": ["sarathi.parivahan.gov.in"]},
+  {"id": "vt-portal-1", "service_id": "vehicle_transfer", "category": "official_link", "question_en": "What is the official website for vehicle ownership transfer?", "expects_insufficient": true},
+  {"id": "vr-portal-1", "service_id": "vehicle_registration", "category": "official_link", "question_en": "What is the official website to register my vehicle?", "expects_insufficient": true}
 ]

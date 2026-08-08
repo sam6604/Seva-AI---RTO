@@ -16,6 +16,7 @@ tie-breaking nudge on top of it.
 from typing import List
 
 from .chunking import Chunk
+from .index import tokenize
 
 _STOPWORDS = {
     "the", "a", "an", "is", "are", "do", "does", "did", "i", "my", "me",
@@ -27,15 +28,16 @@ _STOPWORDS = {
 
 def rerank(query: str, fused_candidates: List[Chunk], top_k: int) -> List[Chunk]:
     """`fused_candidates` must already be in fusion rank order (best first)."""
-    q = query.lower()
-    q_words = {w for w in q.strip("?!.").split() if w not in _STOPWORDS and len(w) > 2}
+    q_tokens = tokenize(query)
+    q = " ".join(q_tokens)
+    q_words = {w for w in q_tokens if w not in _STOPWORDS and len(w) > 2}
 
     def score(rank: int, c: Chunk) -> float:
-        text = c.text.lower()
+        text = " ".join(tokenize(c.text))
         s = 1.0 / (rank + 1)  # dominant term: preserve the fused ordering
-        if q.strip("?!.") in text:
+        if q in text:
             s += 0.5  # exact phrase containment, small nudge
-        content_words = {w for w in text.split() if w not in _STOPWORDS and len(w) > 2}
+        content_words = {w for w in tokenize(c.text) if w not in _STOPWORDS and len(w) > 2}
         overlap = len(q_words & content_words)
         s += overlap * 0.02
         if not c.verified:

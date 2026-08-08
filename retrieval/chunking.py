@@ -7,7 +7,11 @@ to), this keeps track of:
 - service_id   — which of the 3 RTO services the chunk belongs to
                  ("general" for cross-cutting FAQ content that isn't
                  specific to one service and should never be filtered out)
-- category     — eligibility / documents / procedure / forms / faq / gap
+- category     — eligibility / documents / procedure / forms / faq / gap /
+                 official_link (a real, verified government portal URL —
+                 always safe to cite even for a service whose step-by-step
+                 data is still a gap, so it's excluded from the "does this
+                 service have verified *process* data" check in pipeline.py)
 - verified     — False for the vehicle_transfer / vehicle_registration
                  placeholder files (see the data-gap note in those files).
                  A chunk with verified=False must never be treated as
@@ -75,6 +79,17 @@ def _docs_chunks(step: dict, service_id: str, source: str, idx: int) -> List[Chu
     return out
 
 
+def _official_link_chunks(obj: dict, service_id: str, source: str) -> List[Chunk]:
+    chunks = []
+    for i, link in enumerate(obj.get("links", [])):
+        text = f"Official portal — {link.get('label', '')}: {link.get('url', '')}"
+        chunks.append(Chunk(
+            id=f"{source}:link{i}", text=text,
+            service_id=service_id, category="official_link", source=source,
+        ))
+    return chunks
+
+
 def _service_dataset_chunks(obj: dict, service_id: str, source: str) -> List[Chunk]:
     if obj.get("status") == "no_verified_data":
         # Gap placeholder — keep exactly one chunk so the router/pipeline can
@@ -120,7 +135,10 @@ def load_all_chunks() -> List[Chunk]:
         for path in sorted(service_dir.glob("*.json")):
             obj = json.loads(path.read_text(encoding="utf-8"))
             source = f"{service_dir.name}/{path.name}"
-            chunks.extend(_service_dataset_chunks(obj, service_id, source))
+            if path.name == "official_links.json":
+                chunks.extend(_official_link_chunks(obj, service_id, source))
+            else:
+                chunks.extend(_service_dataset_chunks(obj, service_id, source))
 
     for path in sorted(DATA_DIR.glob("*.json")):
         obj = json.loads(path.read_text(encoding="utf-8"))

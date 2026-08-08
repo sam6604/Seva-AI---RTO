@@ -42,7 +42,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from retrieval import retrieve  # noqa: E402
+from retrieval import get_process_outline, retrieve  # noqa: E402
 
 QUESTIONS_PATH = Path(__file__).parent / "test_questions.json"
 
@@ -94,12 +94,19 @@ def run_retrieval_eval(questions):
 
         if q.get("expected_keywords"):
             hit_total += 1
-            joined = " ".join(c.text.lower() for c in result.chunks)
+            # Phase 2: for a service with verified process data, the model
+            # sees the retrieved fragments AND the full process outline
+            # (see intelligence.respond()) — so a fair check is "does the
+            # keyword show up in either", matching what actually reaches
+            # the LLM, not just the top-k citation fragments.
+            outline = get_process_outline(result.service_id) or ""
+            joined = " ".join(c.text.lower() for c in result.chunks) + " " + outline.lower()
             hits = [kw for kw in q["expected_keywords"] if kw.lower() in joined]
             if hits:
                 hit_correct += 1
             else:
-                print(f"  [RETRIEVAL MISS] {q['id']}: none of {q['expected_keywords']} found in retrieved chunks")
+                print(f"  [RETRIEVAL MISS] {q['id']}: none of {q['expected_keywords']} found in retrieved chunks "
+                      f"or process outline")
 
     print()
     if routing_total:

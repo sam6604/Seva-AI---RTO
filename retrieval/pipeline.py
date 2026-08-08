@@ -18,8 +18,16 @@ import numpy as np
 from . import index as _index
 from .chunking import KNOWN_SERVICES, Chunk
 from .fusion import reciprocal_rank_fusion
+from .index import tokenize
 from .rerank import rerank
 from .router import detect_service
+
+# Categories that represent actual verified step-by-step process knowledge.
+# official_link and faq chunks are real and safe to cite, but they aren't
+# "this service's process is documented" — a service with only an
+# official_link chunk (see data/*/official_links.json) must still be
+# treated as a data gap for full step-guidance purposes.
+PROCESS_CATEGORIES = {"eligibility", "documents", "procedure", "forms"}
 
 # Below this fused confidence, we don't trust the retrieval enough to let
 # the model answer from it — the caller should fall back to the
@@ -44,6 +52,11 @@ def _candidate_indices(chunks: List[Chunk], service_id: Optional[str]) -> List[i
     return [i for i, c in enumerate(chunks) if c.service_id in (service_id, "general")]
 
 
+def _has_verified_process_data(chunks: List[Chunk], service_id: str) -> bool:
+    return any(c.verified and c.category in PROCESS_CATEGORIES
+               for c in chunks if c.service_id == service_id)
+
+
 def retrieve(query: str, service_id: Optional[str] = None, top_k: int = 4) -> RetrievalResult:
     chunks, bm25, tfidf, svd, svd_matrix = _index.get_index()
 
@@ -56,8 +69,7 @@ def retrieve(query: str, service_id: Optional[str] = None, top_k: int = 4) -> Re
         return RetrievalResult(query, service_id, display_name, False, [], 0.0, True)
 
     candidates = _candidate_indices(chunks, service_id)
-    service_has_verified_data = any(chunks[i].verified for i in candidates if chunks[i].service_id == service_id) \
-        if service_id else True
+    service_has_verified_data = _has_verified_process_data(chunks, service_id) if service_id else True
 
     if not candidates:
         return RetrievalResult(query, service_id, display_name, service_has_verified_data, [], 0.0, True)
@@ -72,7 +84,7 @@ def retrieve(query: str, service_id: Optional[str] = None, top_k: int = 4) -> Re
         return RetrievalResult(query, service_id, display_name, False, [], 0.0, True)
 
     # --- keyword retrieval (BM25) ---
-    tokenized_query = query.lower().split()
+    tokenized_query = tokenize(query)
     bm25_scores = bm25.get_scores(tokenized_query)
     bm25_ranked = sorted(candidates, key=lambda i: bm25_scores[i], reverse=True)
 
@@ -117,7 +129,7 @@ def retrieve(query: str, service_id: Optional[str] = None, top_k: int = 4) -> Re
         if top_service != "general":
             service_id = top_service
             display_name = KNOWN_SERVICES.get(service_id, service_id)
-            service_has_verified_data = True
+            service_has_verified_data = _has_verified_process_data(chunks, service_id)
 
     insufficient = confidence < CONFIDENCE_FLOOR or not final_chunks
     return RetrievalResult(query, service_id, display_name, service_has_verified_data, final_chunks, confidence, insufficient)

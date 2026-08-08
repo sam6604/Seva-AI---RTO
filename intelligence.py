@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 from dotenv import load_dotenv
 from sarvamai import SarvamAI
 
-from retrieval import retrieve
+from retrieval import format_official_links, get_process_outline, retrieve
 
 load_dotenv()
 
@@ -15,16 +15,33 @@ _client = SarvamAI(api_subscription_key=SARVAM_API_KEY) if SARVAM_API_KEY else N
 
 OUT_OF_SCOPE_REPLY = "Main sirf Driving License, Vehicle Registration aur Vehicle Ownership Transfer se judi madad kar sakti hoon."
 
-# Shown when retrieval doesn't have enough verified evidence to ground an
-# answer (either the service has no verified dataset yet, e.g. vehicle
-# transfer/registration today, or the fused retrieval confidence is too
-# low for this specific question) — per the hard "do not hallucinate"
+# Shown when retrieval doesn't have enough verified evidence to ground a
+# full answer (either the service has no verified process dataset yet, e.g.
+# vehicle transfer/registration today, or the fused retrieval confidence is
+# too low for this specific question) — per the hard "do not hallucinate"
 # requirement, we hand this back to the user instead of guessing, and skip
 # the LLM call entirely so it's also the fastest path in the pipeline.
+#
+# Phase 2: this is no longer a dead end. When we know which service the
+# user meant, we still have a verified, real official portal link for it
+# (see data/*/official_links.json) even though we don't have the verified
+# step-by-step data — so the fallback stays actionable instead of just
+# apologetic.
 INSUFFICIENT_EVIDENCE_TEMPLATE = (
     "Mere paas is sawaal ke liye abhi verified/confirmed jaankari nahi hai. "
     "Kripya official RTO source (Parivahan portal ya apne nazdeeki RTO office) se confirm kariye."
 )
+
+
+def _insufficient_evidence_reply(service_id: Optional[str]) -> str:
+    links_block = format_official_links(service_id)
+    if not links_block:
+        return INSUFFICIENT_EVIDENCE_TEMPLATE
+    return (
+        f"{INSUFFICIENT_EVIDENCE_TEMPLATE}\n\n"
+        f"Aap seedha yahan se shuru kar sakte hain (official portal):\n{links_block}"
+    )
+
 
 # Scope and behavior are enforced by instructing the model, not by
 # hand-coded keyword lists or a rigid state machine. Retrieval decides
@@ -38,6 +55,14 @@ SYSTEM_PROMPT = (
     "fees, eligibility rules, procedures, government requirements, application status, or official "
     "URLs that aren't in the reference material. If the reference material only partially covers the "
     "question, answer the part it covers and clearly say the rest isn't confirmed yet.\n\n"
+    "Be actionable, not just explanatory: every reply should end with a clear 'what to do next' — "
+    "the next concrete action the user should take, not only a description of the process. When the "
+    "reference material includes a 'Full process outline', use it to figure out where the user "
+    "currently is in the process (from the conversation so far) and continue from there — name the "
+    "required documents at the step where they're actually needed, don't front-load every document "
+    "for every step at once. When the reference material includes an official portal link, give the "
+    "user that exact link as the actionable next step (e.g. 'you can do this at <link>'), instead of "
+    "just saying to check the official website.\n\n"
     "For the Driving Licence prerequisite flow specifically, when reference material for it is "
     "present: guide the user through it naturally — ask any prerequisite questions one at a time, "
     "then walk through the steps, waiting for the user to confirm each step is done before moving on. "
@@ -82,7 +107,7 @@ def respond(
     result = retrieve(user_message, service_id=service_id, top_k=4)
 
     if result.insufficient_evidence:
-        reply = INSUFFICIENT_EVIDENCE_TEMPLATE
+        reply = _insufficient_evidence_reply(result.service_id)
         history.append({"role": "user", "content": user_message})
         history.append({"role": "assistant", "content": reply})
         return reply, []
@@ -90,7 +115,21 @@ def respond(
     citations = [f"[{c.source}] {c.text}" for c in result.chunks]
     context_block = "\n".join(f"- {c}" for c in citations)
 
-    augmented_message = f"Reference material:\n{context_block}\n\nUser: {user_message}"
+    # Phase 2: attach the complete ordered process outline (not just the
+    # top-k retrieved fragments) so the model can track continuous
+    # multi-turn progress and give a concrete "what's next", and attach the
+    # official portal link so the answer ends with something actionable.
+    extra_blocks = []
+    outline = get_process_outline(result.service_id)
+    if outline:
+        extra_blocks.append(f"Full process outline (for tracking progress; use conversation history "
+                             f"to judge which step the user is on):\n{outline}")
+    links_block = format_official_links(result.service_id)
+    if links_block:
+        extra_blocks.append(f"Official portal link(s) for this service:\n{links_block}")
+    extra_context = ("\n\n" + "\n\n".join(extra_blocks)) if extra_blocks else ""
+
+    augmented_message = f"Reference material:\n{context_block}{extra_context}\n\nUser: {user_message}"
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": augmented_message}]
     reply = _call_llm(messages)
 

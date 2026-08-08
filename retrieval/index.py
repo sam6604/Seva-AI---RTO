@@ -8,6 +8,7 @@ re-tokenize or re-fit anything on every request.
 Call `refresh()` if data/ changes at runtime (not needed for the hackathon
 demo, but keeps this honest for a long-running server).
 """
+import re
 from threading import Lock
 from typing import List
 
@@ -26,9 +27,26 @@ _tfidf: TfidfVectorizer | None = None
 _svd: TruncatedSVD | None = None
 _svd_matrix = None  # (n_chunks, n_components) dense LSA embedding matrix
 
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+# British/Indian-English government spellings vs. common American-English
+# query spellings, so "license" (how most people type/say it) matches
+# "licence" (how the data and official portals spell it) — previously a
+# genuine miss: the official Sarathi link never surfaced for "driving
+# license" queries because of this exact mismatch.
+_SPELLING_NORMALIZE = {"license": "licence", "licenses": "licences"}
+
+
+def tokenize(text: str) -> List[str]:
+    """Shared tokenizer for both indexing and querying — lowercase, strip
+    punctuation, and normalize a couple of known British/American spelling
+    mismatches so keyword matching isn't silently broken by them."""
+    tokens = _TOKEN_RE.findall(text.lower())
+    return [_SPELLING_NORMALIZE.get(t, t) for t in tokens]
+
 
 def _tokenize(text: str) -> List[str]:
-    return text.lower().split()
+    return tokenize(text)
 
 
 def _build():
@@ -43,7 +61,7 @@ def _build():
     tokenized = [_tokenize(c.text) for c in _chunks]
     _bm25 = BM25Okapi(tokenized)
 
-    _tfidf = TfidfVectorizer(stop_words="english")
+    _tfidf = TfidfVectorizer(stop_words="english", tokenizer=tokenize, preprocessor=lambda x: x, token_pattern=None)
     tfidf_matrix = _tfidf.fit_transform([c.text for c in _chunks])
 
     # LSA (TF-IDF + SVD) as the "semantic" retriever: it groups
