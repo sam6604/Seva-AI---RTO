@@ -1,0 +1,9 @@
+{
+  "service_id": "vehicle_transfer",
+  "display_name": "Vehicle Ownership Transfer",
+  "status": "no_verified_data",
+  "note": "GAP: no verified RTO reference data has been added for this service yet. Do not let the assistant invent eligibility rules, documents, fees, or procedures for Vehicle Ownership Transfer until this file is populated with real, verified data using the same schema as data/driving_license/dl_dataset.json (prereq_questions, steps[].docs_needed, steps[].fields, etc.). Until then, the retrieval layer marks this service as unverified and the assistant must tell the user to confirm with the official RTO source (Parivahan / local RTO) instead of guessing.",
+  "prereq_questions": [],
+  "steps": [],
+  "out_of_scope_examples": []
+}

@@ -1,0 +1,26 @@
+[
+  {"id": "dl-elig-1", "service_id": "driving_license", "category": "eligibility", "question_en": "Do I need a learner's license before applying for a driving license?", "expected_keywords": ["learner", "license"]},
+  {"id": "dl-docs-1", "service_id": "driving_license", "category": "documents", "question_en": "What documents do I need for a driving license?", "expected_keywords": ["aadhaar", "address proof", "photo"]},
+  {"id": "dl-docs-2", "service_id": "driving_license", "category": "documents", "question_hi": "Driving license ke liye kaunse documents chahiye?", "expected_keywords": ["aadhaar", "address proof", "photo"]},
+  {"id": "dl-proc-1", "service_id": "driving_license", "category": "procedure", "question_en": "What is the step by step process to get a driving license?", "expected_keywords": ["gather_documents", "fill_online_form", "book_slot", "visit_rto_and_test"]},
+  {"id": "dl-proc-2", "service_id": "driving_license", "category": "procedure", "question_en": "How do I book a slot at the RTO?", "expected_keywords": ["book_slot", "rto"]},
+  {"id": "dl-form-1", "service_id": "driving_license", "category": "forms", "question_en": "What do I write in the Learner's License Number field on the form?", "expected_keywords": ["learner", "license number", "field"]},
+  {"id": "dl-common-1", "service_id": null, "category": "common_problems", "question_en": "Can I change my vehicle type later after applying?", "expected_keywords": ["vehicle category", "later"], "note": "content is genuinely cross-service FAQ, not DL-specific, so no single service is the 'correct' route"},
+  {"id": "dl-service-1", "service_id": "driving_license", "category": "service_specific", "question_en": "Is this process for a two-wheeler or four-wheeler license?", "expected_keywords": ["two-wheeler", "four-wheeler"]},
+  {"id": "dl-service-2", "service_id": "driving_license", "category": "service_specific", "question_or": "Driving licence pain kete dina lage?", "expected_keywords": ["learner", "license"]},
+
+  {"id": "vt-elig-1", "service_id": "vehicle_transfer", "category": "eligibility", "question_en": "Am I eligible to transfer ownership of a vehicle I just bought used?", "expects_insufficient": true},
+  {"id": "vt-docs-1", "service_id": "vehicle_transfer", "category": "documents", "question_en": "What documents do I need for vehicle ownership transfer?", "expects_insufficient": true},
+  {"id": "vt-proc-1", "service_id": "vehicle_transfer", "category": "procedure", "question_en": "What is the process to transfer vehicle ownership after buying a second-hand car?", "expects_insufficient": true},
+  {"id": "vt-fee-1", "service_id": "vehicle_transfer", "category": "common_problems", "question_en": "How much is the fee for vehicle ownership transfer?", "expects_insufficient": true},
+  {"id": "vt-hi-1", "service_id": "vehicle_transfer", "category": "service_specific", "question_hi": "Gaadi ka ownership transfer kaise karte hain?", "expects_insufficient": true},
+
+  {"id": "vr-elig-1", "service_id": "vehicle_registration", "category": "eligibility", "question_en": "Who is eligible to register a newly purchased vehicle?", "expects_insufficient": true},
+  {"id": "vr-docs-1", "service_id": "vehicle_registration", "category": "documents", "question_en": "What documents are required for new vehicle registration?", "expects_insufficient": true},
+  {"id": "vr-proc-1", "service_id": "vehicle_registration", "category": "procedure", "question_en": "What is the step by step process to register a new vehicle?", "expects_insufficient": true},
+  {"id": "vr-form-1", "service_id": "vehicle_registration", "category": "forms", "question_en": "What details go in the RC book application form?", "expects_insufficient": true},
+  {"id": "vr-hi-1", "service_id": "vehicle_registration", "category": "service_specific", "question_hi": "Naye vehicle ka registration kaise karwayein?", "expects_insufficient": true},
+
+  {"id": "oos-1", "service_id": null, "category": "out_of_scope", "question_en": "What's the weather like today?", "expects_out_of_scope": true},
+  {"id": "oos-2", "service_id": null, "category": "out_of_scope", "question_en": "Can you recommend a good biryani recipe?", "expects_out_of_scope": true}
+]

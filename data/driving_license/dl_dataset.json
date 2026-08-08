@@ -1,0 +1,34 @@
+{
+  "service_id": "driving_license",
+  "prereq_questions": [
+    {"id": "has_ll", "question": "Do you already have a Learner's License?", "type": "yes_no"},
+    {"id": "first_vehicle", "question": "Is this for a two-wheeler or four-wheeler?", "type": "choice", "options": ["two-wheeler", "four-wheeler"]}
+  ],
+  "steps": [
+    {
+      "step_name": "gather_documents",
+      "time_estimate": "15 min",
+      "docs_needed": ["Aadhaar", "Address proof", "Passport photo", "Learner's License"],
+      "narration_template": "Pehle ye documents taiyaar rakhiye: {docs}"
+    },
+    {
+      "step_name": "fill_online_form",
+      "time_estimate": "20 min",
+      "fields": [
+        {"field_label": "Full Name", "position_hint": "top of form", "narration": "Yahan apna poora naam likhiye, jaise Aadhaar mein hai", "screenshot_url": "screenshots/dl_name_field.png"},
+        {"field_label": "Learner's License Number", "position_hint": "second field", "narration": "Apna learner's license number daaliye, ye aapke LL card pe milega", "screenshot_url": "screenshots/dl_ll_number_field.png"}
+      ]
+    },
+    {
+      "step_name": "book_slot",
+      "time_estimate": "5 min",
+      "narration_template": "Ab apne nazdeeki RTO office ka slot book kariye"
+    },
+    {
+      "step_name": "visit_rto_and_test",
+      "time_estimate": "45 min",
+      "narration_template": "RTO office jaake apna driving test dijiye"
+    }
+  ],
+  "out_of_scope_examples": ["general life advice", "unrelated government schemes", "non-RTO topics"]
+}
