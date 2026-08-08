@@ -1,4 +1,6 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import FloatingAssistant from './FloatingAssistant'
+import { MicIcon, SendIcon, playAudioBase64 } from './utils'
 
 const NAV_ITEMS = [{ key: 'home', label: 'Home', icon: '🚗' }]
 
@@ -25,40 +27,6 @@ const QUICK_ACTIONS = [
   { label: 'Check eligibility', starter: 'Am I eligible to apply for a learner’s license?' },
 ]
 
-function playAudioBase64(base64) {
-  const bytes = atob(base64)
-  const arr = new Uint8Array(bytes.length)
-  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i)
-  const blob = new Blob([arr], { type: 'audio/wav' })
-  const audio = new Audio(URL.createObjectURL(blob))
-  audio.play().catch(() => {}) // if autoplay is ever blocked, the message's own audio stays available to replay
-  return audio
-}
-
-function MicIcon({ recording }) {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-      {recording ? (
-        <rect x="6" y="6" width="12" height="12" rx="2" fill="white" stroke="none" />
-      ) : (
-        <>
-          <rect x="9" y="2" width="6" height="12" rx="3" fill="white" stroke="none" />
-          <path d="M5 10a7 7 0 0 0 14 0" strokeLinecap="round" />
-          <path d="M12 19v3" strokeLinecap="round" />
-        </>
-      )}
-    </svg>
-  )
-}
-
-function SendIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
-      <path d="M3 20l18-8L3 4v6l12 2-12 2z" />
-    </svg>
-  )
-}
-
 export default function App() {
   const [lang, setLang] = useState(null) // null until the user picks one on the language screen
   const [messages, setMessages] = useState([])
@@ -67,8 +35,27 @@ export default function App() {
   const [isRecording, setIsRecording] = useState(false)
   const [isSending, setIsSending] = useState(false)
   const [isGreeting, setIsGreeting] = useState(false)
+  const [officialLinks, setOfficialLinks] = useState(null) // Phase 3: {service_id: {label, links: [{label, url}]}}
   const mediaRecorderRef = useRef(null)
   const chunksRef = useRef([])
+
+  // Phase 3: fetch the verified official portal links once, so "Open
+  // Official Portal" is available without needing a chat round-trip.
+  useEffect(() => {
+    fetch('/api/official-links')
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setOfficialLinks)
+      .catch(() => setOfficialLinks(null)) // silently unavailable is fine — it's a convenience shortcut, not required
+  }, [])
+
+  function openOfficialPortal(serviceId) {
+    const entry = officialLinks?.[serviceId]
+    const url = entry?.links?.[0]?.url
+    if (!url) return
+    // noopener/noreferrer: the government site never gets a handle back to
+    // this window (Phase 3 security requirement — no cross-origin access).
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
 
   async function chooseLanguage(code) {
     setLang(code)
@@ -105,7 +92,7 @@ export default function App() {
       setLang(data.language) // keep tracking language turn to turn in case it changes
       setMessages((m) => [
         ...m,
-        { role: 'assistant', text: data.reply_text, lang: data.language, citations: data.citations },
+        { role: 'assistant', text: data.reply_text, lang: data.language, citations: data.citations, isError: Boolean(data.error) },
       ])
       playAudioBase64(data.audio_base64)
     } catch {
@@ -141,7 +128,7 @@ export default function App() {
           setMessages((m) => [
             ...m,
             { role: 'user', text: data.user_text, lang: data.language },
-            { role: 'assistant', text: data.reply_text, lang: data.language, citations: data.citations },
+            { role: 'assistant', text: data.reply_text, lang: data.language, citations: data.citations, isError: Boolean(data.error) },
           ])
           playAudioBase64(data.audio_base64)
         } catch {
@@ -237,6 +224,30 @@ export default function App() {
           </div>
         </div>
 
+        {/* Phase 3: Open Official Portal — the citizen picks their service and
+            control stays entirely with them; we only open the real government
+            site in a new tab, nothing is scraped, injected, or auto-filled. */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-6">
+          <p className="text-sm font-semibold text-gray-900 mb-1">Open Official Portal</p>
+          <p className="text-xs text-gray-500 mb-3">
+            Go directly to the official government site. Seva AI never fills or submits this for you.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {officialLinks &&
+              Object.entries(officialLinks).map(([serviceId, entry]) => (
+                <button
+                  key={serviceId}
+                  onClick={() => openOfficialPortal(serviceId)}
+                  disabled={!entry.links?.length}
+                  className="text-sm px-4 py-2 rounded-full border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-40 font-medium"
+                >
+                  Open {entry.label} portal ↗
+                </button>
+              ))}
+            {!officialLinks && <p className="text-xs text-gray-400">Loading official links…</p>}
+          </div>
+        </div>
+
         {/* Chat card */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-6">
           <div className="flex items-start gap-3 mb-4">
@@ -255,7 +266,11 @@ export default function App() {
                 <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div
                     className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${
-                      msg.role === 'user' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-800'
+                      msg.role === 'user'
+                        ? 'bg-green-600 text-white'
+                        : msg.isError
+                          ? 'bg-red-50 text-red-700 border border-red-100'
+                          : 'bg-gray-100 text-gray-800'
                     }`}
                   >
                     <p>{msg.text}</p>
@@ -318,6 +333,11 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {/* Phase 3: floating assistant — a separate, self-contained quick-help
+          panel available anywhere in the app, reusing the same backend
+          pipeline (Phase 1 RAG + Phase 2 process guidance) as the main chat. */}
+      <FloatingAssistant lang={lang} />
     </div>
   )
 }

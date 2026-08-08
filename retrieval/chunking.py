@@ -48,6 +48,8 @@ class Chunk:
     category: str
     source: str
     verified: bool = True
+    url: str = ""          # populated for category="official_link" chunks
+    link_label: str = ""   # populated for category="official_link" chunks
 
 
 def _docs_chunks(step: dict, service_id: str, source: str, idx: int) -> List[Chunk]:
@@ -82,10 +84,13 @@ def _docs_chunks(step: dict, service_id: str, source: str, idx: int) -> List[Chu
 def _official_link_chunks(obj: dict, service_id: str, source: str) -> List[Chunk]:
     chunks = []
     for i, link in enumerate(obj.get("links", [])):
-        text = f"Official portal — {link.get('label', '')}: {link.get('url', '')}"
+        label = link.get("label", "")
+        url = link.get("url", "")
+        text = f"Official portal — {label}: {url}"
         chunks.append(Chunk(
             id=f"{source}:link{i}", text=text,
             service_id=service_id, category="official_link", source=source,
+            url=url, link_label=label,
         ))
     return chunks
 

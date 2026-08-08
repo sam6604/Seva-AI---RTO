@@ -67,6 +67,13 @@ SYSTEM_PROMPT = (
     "present: guide the user through it naturally — ask any prerequisite questions one at a time, "
     "then walk through the steps, waiting for the user to confirm each step is done before moving on. "
     "If the user's answer doesn't fit neatly, use your own judgment to keep the conversation moving.\n\n"
+    "Field-level guidance ('what should I enter here?'): when the user is asking about a specific form "
+    "field and reference material for it is present, answer in this shape — (1) what the field means, "
+    "(2) what information they should enter, (3) where they can find that information (e.g. which "
+    "document), when applicable, (4) a simple concrete example, (5) what NOT to enter, when useful. If "
+    "they ask 'what should I enter here' without naming which field, ask them to tell you the field's "
+    "label or name — you cannot see their screen, and you should never assume or guess which field "
+    "they mean.\n\n"
     "If the reference material says data is not yet verified for a service, say so plainly and point "
     "the user to the official RTO/Parivahan source — don't fill the gap from general knowledge.\n\n"
     f"If a question is entirely unrelated to RTO/vehicles, reply with EXACTLY this sentence and "
@@ -76,11 +83,36 @@ SYSTEM_PROMPT = (
 )
 
 
+# Phase 3: shown when the LLM call itself fails or returns something
+# unusable (network error, API error, empty response) — a clear, friendly
+# message instead of a crash, per the explicit error-handling requirement.
+ASSISTANT_UNAVAILABLE_REPLY = (
+    "Abhi mujhe jawaab dene mein dikkat aa rahi hai (connection ya server issue). "
+    "Kripya thodi der baad phir try kariye."
+)
+
+
+class AssistantUnavailableError(Exception):
+    """Raised when the LLM call fails or returns something unusable — callers
+    should show a friendly message instead of crashing (Phase 3 requirement:
+    never assume response.content exists before using it)."""
+
+
 def _call_llm(messages: List[Dict[str, str]]) -> str:
     if not _client:
         raise RuntimeError("SARVAM_API_KEY not set")
-    resp = _client.chat.completions(model=SARVAM_CHAT_MODEL, messages=messages)
-    return resp.choices[0].message.content.strip()
+    try:
+        resp = _client.chat.completions(model=SARVAM_CHAT_MODEL, messages=messages)
+    except Exception as e:  # network error, API error, rate limit, etc.
+        raise AssistantUnavailableError(f"Sarvam chat API call failed: {e}") from e
+
+    choices = getattr(resp, "choices", None)
+    if not choices:
+        raise AssistantUnavailableError("Sarvam chat API returned no choices")
+    content = getattr(choices[0].message, "content", None)
+    if not content or not content.strip():
+        raise AssistantUnavailableError("Sarvam chat API returned an empty response")
+    return content.strip()
 
 
 def respond(
@@ -131,7 +163,14 @@ def respond(
 
     augmented_message = f"Reference material:\n{context_block}{extra_context}\n\nUser: {user_message}"
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": augmented_message}]
-    reply = _call_llm(messages)
+
+    try:
+        reply = _call_llm(messages)
+    except AssistantUnavailableError:
+        reply = ASSISTANT_UNAVAILABLE_REPLY
+        history.append({"role": "user", "content": user_message})
+        history.append({"role": "assistant", "content": reply})
+        return reply, []
 
     history.append({"role": "user", "content": user_message})
     history.append({"role": "assistant", "content": reply})
