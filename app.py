@@ -11,7 +11,6 @@ st.title("🚗 SEVA AI — RTO Assistant")
 st.caption("Speak in any Indian language. SEVA replies back in the same language, by voice and text.")
 
 DEFAULT_LANGUAGE = "hi-IN"
-SERVICE_ID = "driving_license"
 GREETING = "Namaste! Main SEVA AI hoon, RTO aur Driving License se judi madad ke liye. Aapko kis cheez mein madad chahiye?"
 
 
@@ -70,7 +69,8 @@ st.divider()
 audio_value = st.audio_input("Tap to record your answer", key=f"audio_{st.session_state.turn_id}")
 if audio_value is not None:
     english_reply = user_turn_from_audio(audio_value.getvalue())
-    answer, citations = intelligence.respond(st.session_state.llm_history, english_reply, SERVICE_ID)
+    # service_id left unset so the hybrid RAG pipeline auto-detects the service
+    answer, citations = intelligence.respond(st.session_state.llm_history, english_reply)
     bot_say(answer, citations=citations)
     st.session_state.turn_id += 1
     st.rerun()

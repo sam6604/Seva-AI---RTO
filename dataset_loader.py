@@ -1,9 +1,8 @@
 import json
 from pathlib import Path
-from typing import Any, List
+from typing import List, Optional
 
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
+from retrieval import retrieve
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -13,54 +12,32 @@ def load_dataset(service_id: str) -> dict:
     SWAP POINT: replace this function body when the real Data module JSON
     is ready — signature must not change.
 
-    Reads data/dl_dataset.json.
+    Reads data/<service_id>/dl_dataset.json (driving_license today; the
+    other two services don't have a real dataset yet — see the data-gap
+    note in data/vehicle_transfer/dataset.json and
+    data/vehicle_registration/dataset.json).
     """
-    path = DATA_DIR / "dl_dataset.json"
+    path = DATA_DIR / "driving_license" / "dl_dataset.json"
+    if service_id != "driving_license":
+        path = DATA_DIR / service_id / "dataset.json"
     if not path.exists():
         raise FileNotFoundError(f"Dataset file not found: {path}")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _flatten_to_chunks(obj: Any) -> List[str]:
+def get_relevant_context(query: str, service_id: Optional[str] = None, top_k: int = 3) -> List[str]:
     """
-    Generic JSON -> text-chunk flattening for RAG, so any file dropped into
-    data/ (FAQ lists, the DL dataset, or a new schema entirely) is indexable
-    without writing per-format parsing code.
+    Backward-compatible wrapper around the Phase 1 hybrid RAG pipeline
+    (retrieval/pipeline.py): service-aware BM25 + semantic retrieval, RRF
+    fusion, and reranking, filtered down to plain text strings the way the
+    original TF-IDF-only version returned them.
+
+    `service_id=None` lets the pipeline auto-detect the service from the
+    query itself instead of the caller having to know it in advance.
+    Prefer calling `retrieval.retrieve()` directly (via intelligence.py) if
+    you need the confidence score, source refs, or the "no verified data"
+    flag — this wrapper only exists for any older caller that just wants
+    text chunks.
     """
-    chunks = []
-    if isinstance(obj, dict):
-        scalars = {k: v for k, v in obj.items() if isinstance(v, (str, int, float))}
-        if scalars:
-            chunks.append(" | ".join(f"{k}: {v}" for k, v in scalars.items()))
-        for v in obj.values():
-            if isinstance(v, (dict, list)):
-                chunks.extend(_flatten_to_chunks(v))
-    elif isinstance(obj, list):
-        for item in obj:
-            chunks.extend(_flatten_to_chunks(item))
-    return chunks
-
-
-def _all_chunks() -> List[str]:
-    chunks = []
-    for path in DATA_DIR.glob("*.json"):
-        chunks.extend(_flatten_to_chunks(json.loads(path.read_text(encoding="utf-8"))))
-    return chunks
-
-
-def get_relevant_context(query: str, service_id: str, top_k: int = 3) -> List[str]:
-    """
-    Return top_k matching text chunks from every JSON file in data/, using
-    TF-IDF overlap. Intentionally simple — no FAISS/embeddings needed for
-    this dataset size.
-    """
-    corpus = _all_chunks()
-    if not corpus:
-        return []
-
-    vectorizer = TfidfVectorizer(stop_words="english")
-    matrix = vectorizer.fit_transform(corpus + [query])
-    scores = (matrix[:-1] @ matrix[-1].T).toarray().ravel()
-
-    top_idx = np.argsort(scores)[::-1][:top_k]
-    return [corpus[i] for i in top_idx if scores[i] > 0]
+    result = retrieve(query, service_id=service_id, top_k=top_k)
+    return [c.text for c in result.chunks]

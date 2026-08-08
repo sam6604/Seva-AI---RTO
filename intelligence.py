@@ -1,10 +1,10 @@
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 from sarvamai import SarvamAI
 
-from dataset_loader import get_relevant_context
+from retrieval import format_official_links, get_process_outline, retrieve
 
 load_dotenv()
 
@@ -13,29 +13,66 @@ SARVAM_CHAT_MODEL = "sarvam-105b"
 
 _client = SarvamAI(api_subscription_key=SARVAM_API_KEY) if SARVAM_API_KEY else None
 
-OUT_OF_SCOPE_REPLY = "Main sirf Driving License aur RTO se judi madad kar sakti hoon."
+OUT_OF_SCOPE_REPLY = "Main sirf Driving License, Vehicle Registration aur Vehicle Ownership Transfer se judi madad kar sakti hoon."
 
-# Scope and behavior are enforced by instructing the model, not by hand-coded
-# keyword lists or a rigid state machine — the reference material grounds
-# the DL flow specifically, everything else is answered from the model's
-# own general knowledge with a clear accuracy caveat.
+# Shown when retrieval doesn't have enough verified evidence to ground a
+# full answer (either the service has no verified process dataset yet, e.g.
+# vehicle transfer/registration today, or the fused retrieval confidence is
+# too low for this specific question) — per the hard "do not hallucinate"
+# requirement, we hand this back to the user instead of guessing, and skip
+# the LLM call entirely so it's also the fastest path in the pipeline.
+#
+# Phase 2: this is no longer a dead end. When we know which service the
+# user meant, we still have a verified, real official portal link for it
+# (see data/*/official_links.json) even though we don't have the verified
+# step-by-step data — so the fallback stays actionable instead of just
+# apologetic.
+INSUFFICIENT_EVIDENCE_TEMPLATE = (
+    "Mere paas is sawaal ke liye abhi verified/confirmed jaankari nahi hai. "
+    "Kripya official RTO source (Parivahan portal ya apne nazdeeki RTO office) se confirm kariye."
+)
+
+
+def _insufficient_evidence_reply(service_id: Optional[str]) -> str:
+    links_block = format_official_links(service_id)
+    if not links_block:
+        return INSUFFICIENT_EVIDENCE_TEMPLATE
+    return (
+        f"{INSUFFICIENT_EVIDENCE_TEMPLATE}\n\n"
+        f"Aap seedha yahan se shuru kar sakte hain (official portal):\n{links_block}"
+    )
+
+
+# Scope and behavior are enforced by instructing the model, not by
+# hand-coded keyword lists or a rigid state machine. Retrieval decides
+# *whether* there's grounding evidence (see respond()); this prompt decides
+# *how* the model uses whatever evidence it's given.
 SYSTEM_PROMPT = (
-    "You are SEVA, a voice-first RTO (Regional Transport Office) help-desk assistant for India.\n\n"
-    "For Learner's/Driving License (DL) applications specifically: you have fully "
-    "verified, step-by-step reference material below. Guide the user through it "
-    "naturally — ask any prerequisite questions it lists one at a time, then walk "
-    "through the process step by step, waiting for the user to confirm each step "
-    "is done before moving to the next. If the user's answer doesn't fit neatly "
-    "(e.g. a vehicle type not explicitly listed), use your own judgment to respond "
-    "helpfully and keep the conversation moving — don't just say you don't understand.\n\n"
-    "For any other RTO topic (vehicle registration, permits, challans, traffic rules, "
-    "etc.): you may answer using your own general knowledge, but always add a short "
-    "warning that this isn't from verified data yet and to confirm with the official "
-    "RTO source.\n\n"
-    f"If a question is entirely unrelated to RTO/vehicles, reply with EXACTLY this "
-    f"sentence and nothing else: \"{OUT_OF_SCOPE_REPLY}\"\n\n"
-    "Keep responses short and simple, in a Hindi/English mix (Hinglish) unless the "
-    "user is clearly writing in a different language."
+    "You are SEVA, a voice-first RTO (Regional Transport Office) help-desk assistant for India, "
+    "covering three services: Driving Licence, Vehicle Registration, and Vehicle Ownership Transfer.\n\n"
+    "You will be given a block of 'Reference material' retrieved for this specific question, each "
+    "line tagged with its source. Ground your answer in that material — do not invent documents, "
+    "fees, eligibility rules, procedures, government requirements, application status, or official "
+    "URLs that aren't in the reference material. If the reference material only partially covers the "
+    "question, answer the part it covers and clearly say the rest isn't confirmed yet.\n\n"
+    "Be actionable, not just explanatory: every reply should end with a clear 'what to do next' — "
+    "the next concrete action the user should take, not only a description of the process. When the "
+    "reference material includes a 'Full process outline', use it to figure out where the user "
+    "currently is in the process (from the conversation so far) and continue from there — name the "
+    "required documents at the step where they're actually needed, don't front-load every document "
+    "for every step at once. When the reference material includes an official portal link, give the "
+    "user that exact link as the actionable next step (e.g. 'you can do this at <link>'), instead of "
+    "just saying to check the official website.\n\n"
+    "For the Driving Licence prerequisite flow specifically, when reference material for it is "
+    "present: guide the user through it naturally — ask any prerequisite questions one at a time, "
+    "then walk through the steps, waiting for the user to confirm each step is done before moving on. "
+    "If the user's answer doesn't fit neatly, use your own judgment to keep the conversation moving.\n\n"
+    "If the reference material says data is not yet verified for a service, say so plainly and point "
+    "the user to the official RTO/Parivahan source — don't fill the gap from general knowledge.\n\n"
+    f"If a question is entirely unrelated to RTO/vehicles, reply with EXACTLY this sentence and "
+    f"nothing else: \"{OUT_OF_SCOPE_REPLY}\"\n\n"
+    "Keep responses short and simple, in a Hindi/English mix (Hinglish) unless the user is clearly "
+    "writing in a different language."
 )
 
 
@@ -46,25 +83,53 @@ def _call_llm(messages: List[Dict[str, str]]) -> str:
     return resp.choices[0].message.content.strip()
 
 
-def respond(history: List[Dict[str, str]], user_message: str, service_id: str = "driving_license") -> Tuple[str, List[str]]:
+def respond(
+    history: List[Dict[str, str]],
+    user_message: str,
+    service_id: Optional[str] = None,
+) -> Tuple[str, List[str]]:
     """
-    Single entry point for the assistant. Given the conversation so far and
-    the user's latest message, retrieves grounding context and lets the LLM
-    decide how to respond — ask the next prereq question, narrate the next
-    step, answer a tangent, or refuse — using the conversation history
-    itself to track progress instead of a hand-coded state machine.
+    Single entry point for the assistant.
+
+    `service_id`: pass None (the default) to let the hybrid retrieval
+    pipeline auto-detect which of the 3 RTO services the message is about
+    (metadata/service filtering); pass an explicit id to pin it (e.g. a
+    frontend service selector, if one gets added later).
 
     Mutates `history` in place (appends the user turn and the reply) so the
     caller can just keep reusing the same list turn after turn. Returns
-    (reply_text, citations) — citations is [] when the reply is a refusal.
+    (reply_text, citations) — citations is [] for a refusal or an
+    insufficient-evidence response.
     """
     if not _client:
         return "SARVAM_API_KEY set nahi hai, isliye main abhi jawaab nahi de sakta.", []
 
-    citations = get_relevant_context(user_message, service_id, top_k=4)
-    context_block = "\n".join(f"- {c}" for c in citations) if citations else "(no closely matching reference material)"
+    result = retrieve(user_message, service_id=service_id, top_k=4)
 
-    augmented_message = f"Reference material:\n{context_block}\n\nUser: {user_message}"
+    if result.insufficient_evidence:
+        reply = _insufficient_evidence_reply(result.service_id)
+        history.append({"role": "user", "content": user_message})
+        history.append({"role": "assistant", "content": reply})
+        return reply, []
+
+    citations = [f"[{c.source}] {c.text}" for c in result.chunks]
+    context_block = "\n".join(f"- {c}" for c in citations)
+
+    # Phase 2: attach the complete ordered process outline (not just the
+    # top-k retrieved fragments) so the model can track continuous
+    # multi-turn progress and give a concrete "what's next", and attach the
+    # official portal link so the answer ends with something actionable.
+    extra_blocks = []
+    outline = get_process_outline(result.service_id)
+    if outline:
+        extra_blocks.append(f"Full process outline (for tracking progress; use conversation history "
+                             f"to judge which step the user is on):\n{outline}")
+    links_block = format_official_links(result.service_id)
+    if links_block:
+        extra_blocks.append(f"Official portal link(s) for this service:\n{links_block}")
+    extra_context = ("\n\n" + "\n\n".join(extra_blocks)) if extra_blocks else ""
+
+    augmented_message = f"Reference material:\n{context_block}{extra_context}\n\nUser: {user_message}"
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": augmented_message}]
     reply = _call_llm(messages)
 

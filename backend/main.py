@@ -26,7 +26,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-SERVICE_ID = "driving_license"
 AUDIO_TMP_DIR = Path(__file__).resolve().parent.parent / "audio_output"
 
 # Neutral English source string for the one-time greeting, translated into
@@ -55,7 +54,11 @@ class GreetRequest(BaseModel):
 
 
 def _run_turn(history: List[Dict[str, str]], english_message: str, lang: str) -> dict:
-    reply_en, citations = intelligence.respond(history, english_message, SERVICE_ID)
+    # service_id is left unset here so the hybrid RAG pipeline auto-detects
+    # which of the 3 RTO services this message is about (Phase 1
+    # service-aware retrieval) instead of every request being pinned to
+    # driving_license.
+    reply_en, citations = intelligence.respond(history, english_message)
     localized = sc.translate_text(reply_en, target_language_code=lang) if lang != "en-IN" else reply_en
 
     audio_path = Path(sc.tts(localized, language=lang))

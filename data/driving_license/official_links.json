@@ -1,0 +1,15 @@
+{
+  "service_id": "driving_license",
+  "links": [
+    {
+      "label": "Sarathi Parivahan — Learner's/Driving Licence services (apply, renew, check status)",
+      "url": "https://sarathi.parivahan.gov.in/",
+      "source_note": "Official Ministry of Road Transport and Highways portal for driving licence services, confirmed via parivahan.gov.in itself."
+    },
+    {
+      "label": "Parivahan Sewa — main transport services portal",
+      "url": "https://parivahan.gov.in/",
+      "source_note": "Official umbrella portal linking to both Sarathi (driver services) and Vahan (vehicle services)."
+    }
+  ]
+}

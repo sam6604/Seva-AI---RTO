@@ -1,0 +1,15 @@
+{
+  "service_id": "vehicle_registration",
+  "links": [
+    {
+      "label": "Vahan Parivahan — Vehicle registration services (new registration, RC, related services)",
+      "url": "https://vahan.parivahan.gov.in/vahanservice/vahan/",
+      "source_note": "Official Ministry of Road Transport and Highways portal for vehicle registration services, confirmed via parivahan.gov.in's own FAQ page."
+    },
+    {
+      "label": "Parivahan Sewa — main transport services portal",
+      "url": "https://parivahan.gov.in/",
+      "source_note": "Official umbrella portal linking to both Sarathi (driver services) and Vahan (vehicle services)."
+    }
+  ]
+}
