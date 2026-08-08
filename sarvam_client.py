@@ -77,6 +77,18 @@ def stt_transcribe(audio_file_path: str) -> Tuple[str, str]:
     return resp.transcript, resp.language_code
 
 
+def detect_language(text: str) -> str:
+    """
+    Detect the BCP-47 language code of plain typed text using Sarvam's
+    language identification API. Used for the text-input path, where (unlike
+    voice) there's no STT step to detect language from.
+    """
+    if not _client:
+        raise RuntimeError("SARVAM_API_KEY not set in environment")
+    resp = _client.text.identify_language(input=text)
+    return resp.language_code
+
+
 def translate_text(text: str, target_language_code: str, source_language_code: str = "en-IN") -> str:
     """
     Translate `text` from source_language_code to target_language_code using

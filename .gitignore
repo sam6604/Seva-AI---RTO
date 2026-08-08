@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 audio_output/
+*.log
+frontend/node_modules/
+frontend/dist/
