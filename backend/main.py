@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 import intelligence
 import sarvam_client as sc
+from dataset_loader import load_dataset
 from retrieval import KNOWN_SERVICES, get_official_links
 
 app = FastAPI(title="SEVA AI backend")
@@ -201,6 +202,28 @@ def official_links():
         }
         for service_id in KNOWN_SERVICES
     }
+
+
+@app.get("/api/checklist/{service_id}")
+def checklist(service_id: str):
+    """
+    Flat, deduplicated list of documents needed for a service, read straight
+    from the verified dataset (same source of truth as the RAG pipeline) —
+    not hand-duplicated in the frontend, so it can't drift out of sync with
+    the real data. Only driving_license has verified steps today; other
+    service ids return an empty list rather than guessing.
+    """
+    try:
+        dataset = load_dataset(service_id)
+    except FileNotFoundError:
+        return {"service_id": service_id, "documents": []}
+
+    seen = []
+    for step in dataset.get("steps", []):
+        for doc in step.get("docs_needed", []):
+            if doc not in seen:
+                seen.append(doc)
+    return {"service_id": service_id, "documents": seen}
 
 
 @app.get("/api/health")

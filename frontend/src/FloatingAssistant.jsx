@@ -1,24 +1,14 @@
 import { useRef, useState } from 'react'
+import Logo from './Logo'
 import { MicIcon, SendIcon, playAudioBase64 } from './utils'
-
-// Quick-action starters for the 3 buttons the spec calls out. These get
-// SENT immediately (like the main chat's QUICK_ACTIONS), except "What
-// should I enter here?" which — per the system prompt — the assistant will
-// respond to by asking which field, since it genuinely cannot see the
-// citizen's screen (privacy-by-design, not a missing feature).
-const QUICK_ACTIONS = [
-  { key: 'field', label: 'What should I enter here?', starter: 'What should I enter here?' },
-  { key: 'stuck', label: "I'm stuck", starter: "I'm stuck, can you help me?" },
-  { key: 'next', label: 'What do I do next?', starter: 'What do I do next?' },
-]
+import { t } from './i18n'
 
 // A separate, self-contained conversation from the main chat — this is a
 // quick-help companion, not meant to replace or merge with the main SEVA AI
 // chat thread. It still goes through the exact same backend endpoints
-// (/api/chat/text, /api/chat/voice), which means the exact same Phase 1
-// hybrid RAG + Phase 2 process guidance + Phase 2 official links — never a
-// separate/bypassed chatbot.
-export default function FloatingAssistant({ lang }) {
+// (/api/chat/text, /api/chat/voice), which means the exact same hybrid RAG +
+// process guidance + official links — never a separate/bypassed chatbot.
+export default function FloatingAssistant({ lang, uiLang }) {
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState([])
   const [history, setHistory] = useState([])
@@ -27,6 +17,12 @@ export default function FloatingAssistant({ lang }) {
   const [isSending, setIsSending] = useState(false)
   const mediaRecorderRef = useRef(null)
   const chunksRef = useRef([])
+
+  const QUICK_ACTIONS = [
+    { key: 'field', label: t(uiLang, 'floatingField'), starter: 'What should I enter here?' },
+    { key: 'stuck', label: t(uiLang, 'floatingStuck'), starter: "I'm stuck, can you help me?" },
+    { key: 'next', label: t(uiLang, 'floatingNext'), starter: 'What do I do next?' },
+  ]
 
   function pushAssistantReply(data, userTextForVoice) {
     setHistory(data.history || [])
@@ -62,10 +58,7 @@ export default function FloatingAssistant({ lang }) {
       const data = await resp.json()
       pushAssistantReply(data)
     } catch {
-      setMessages((m) => [
-        ...m,
-        { role: 'assistant', text: "Connection error — I couldn't reach SEVA AI. Please try again.", isError: true },
-      ])
+      setMessages((m) => [...m, { role: 'assistant', text: t(uiLang, 'floatingConnError'), isError: true }])
     } finally {
       setIsSending(false)
     }
@@ -95,10 +88,7 @@ export default function FloatingAssistant({ lang }) {
           const data = await resp.json()
           pushAssistantReply(data, data.user_text)
         } catch {
-          setMessages((m) => [
-            ...m,
-            { role: 'assistant', text: "Couldn't hear that — please try again, or type your question instead.", isError: true },
-          ])
+          setMessages((m) => [...m, { role: 'assistant', text: t(uiLang, 'floatingHearError'), isError: true }])
         } finally {
           setIsSending(false)
         }
@@ -107,11 +97,8 @@ export default function FloatingAssistant({ lang }) {
       mediaRecorderRef.current = recorder
       setIsRecording(true)
     } catch {
-      // Voice failing must never block text (Phase 3 error-handling requirement).
-      setMessages((m) => [
-        ...m,
-        { role: 'assistant', text: 'Microphone access is needed for voice — you can still type your question below.', isError: true },
-      ])
+      // Voice failing must never block text.
+      setMessages((m) => [...m, { role: 'assistant', text: t(uiLang, 'floatingMicError'), isError: true }])
     }
   }
 
@@ -122,8 +109,8 @@ export default function FloatingAssistant({ lang }) {
         aria-label="Open Seva AI assistant"
         className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-full bg-linear-to-br from-orange-400 to-green-500 text-white shadow-lg px-5 py-3.5 hover:brightness-105 transition-all"
       >
-        <span className="text-xl leading-none">🤖</span>
-        <span className="font-semibold text-sm">Seva AI</span>
+        <Logo size={22} />
+        <span className="font-semibold text-sm">{t(uiLang, 'appName')}</span>
       </button>
     )
   }
@@ -134,11 +121,11 @@ export default function FloatingAssistant({ lang }) {
       role="dialog"
       aria-label="Seva AI floating assistant"
     >
-      {/* Header — large, clear close button per accessibility requirement */}
+      {/* Header — large, clear close button for accessibility */}
       <div className="flex items-center justify-between px-4 py-3 bg-linear-to-br from-orange-400 to-green-500 text-white shrink-0">
         <div className="flex items-center gap-2">
-          <span className="text-xl leading-none">🤖</span>
-          <span className="font-bold text-base">Seva AI</span>
+          <Logo size={22} />
+          <span className="font-bold text-base">{t(uiLang, 'appName')}</span>
         </div>
         <button
           onClick={() => setIsOpen(false)}
@@ -152,7 +139,7 @@ export default function FloatingAssistant({ lang }) {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3 min-h-[120px]">
         {messages.length === 0 && (
-          <p className="text-base text-gray-700 font-medium">How can I help you?</p>
+          <p className="text-base text-gray-700 font-medium">{t(uiLang, 'floatingHelp')}</p>
         )}
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -168,7 +155,7 @@ export default function FloatingAssistant({ lang }) {
               {msg.text}
               {msg.citations?.length > 0 && (
                 <details className="mt-2 text-xs opacity-80">
-                  <summary className="cursor-pointer">📚 Sources</summary>
+                  <summary className="cursor-pointer">📚 {t(uiLang, 'sources')}</summary>
                   <ul className="list-disc pl-4 mt-1">
                     {msg.citations.map((c, ci) => (
                       <li key={ci}>{c}</li>
@@ -179,7 +166,7 @@ export default function FloatingAssistant({ lang }) {
             </div>
           </div>
         ))}
-        {isSending && <p className="text-sm text-gray-400">Seva AI is thinking…</p>}
+        {isSending && <p className="text-sm text-gray-400">{t(uiLang, 'floatingThinking')}</p>}
       </div>
 
       {/* Quick actions — large, simple buttons for low-literacy/elderly users */}
@@ -200,7 +187,7 @@ export default function FloatingAssistant({ lang }) {
       <div className="px-4 pb-3 flex items-center gap-2 shrink-0">
         <button
           onClick={toggleRecording}
-          aria-label={isRecording ? 'Stop recording' : 'Ask a question by voice'}
+          aria-label={isRecording ? t(uiLang, 'stopRecordTitle') : t(uiLang, 'recordTitle')}
           className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 transition-colors ${
             isRecording ? 'bg-red-500 animate-pulse' : 'bg-green-600 hover:bg-green-700'
           }`}
@@ -212,27 +199,24 @@ export default function FloatingAssistant({ lang }) {
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && sendText(inputText)}
-          placeholder="Ask a question..."
+          placeholder={t(uiLang, 'floatingPlaceholder')}
           disabled={isRecording}
-          aria-label="Type your question"
+          aria-label={t(uiLang, 'floatingPlaceholder')}
           className="flex-1 rounded-full border border-gray-200 bg-gray-50 px-4 py-2.5 text-base outline-none focus:border-green-400"
         />
         <button
           onClick={() => sendText(inputText)}
           disabled={isSending || !inputText.trim()}
-          aria-label="Send question"
+          aria-label={t(uiLang, 'sendTitle')}
           className="w-11 h-11 rounded-full bg-green-600 hover:bg-green-700 disabled:opacity-40 flex items-center justify-center shrink-0"
         >
           <SendIcon size={20} />
         </button>
       </div>
 
-      {/* Privacy note — always visible, not tucked away, per Phase 3 privacy requirement */}
+      {/* Privacy note — always visible, not tucked away */}
       <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 shrink-0">
-        <p className="text-xs text-gray-500 leading-snug">
-          🔒 Seva AI provides guidance only. Your information stays under your control — nothing is read
-          from your screen automatically, and no forms are filled or submitted for you.
-        </p>
+        <p className="text-xs text-gray-500 leading-snug">{t(uiLang, 'floatingPrivacy')}</p>
       </div>
     </div>
   )
