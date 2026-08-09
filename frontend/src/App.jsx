@@ -1,4 +1,7 @@
-import { useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+import FloatingAssistant from './FloatingAssistant'
+import { useVoiceChat } from './useVoiceChat'
+import { MicIcon, SendIcon, StopIcon, extractPortalLink, playAudioBase64 } from './utils'
 
 const NAV_ITEMS = [{ key: 'home', label: 'Home', icon: '🚗' }]
 
@@ -25,50 +28,41 @@ const QUICK_ACTIONS = [
   { label: 'Check eligibility', starter: 'Am I eligible to apply for a learner’s license?' },
 ]
 
-function playAudioBase64(base64) {
-  const bytes = atob(base64)
-  const arr = new Uint8Array(bytes.length)
-  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i)
-  const blob = new Blob([arr], { type: 'audio/wav' })
-  const audio = new Audio(URL.createObjectURL(blob))
-  audio.play().catch(() => {}) // if autoplay is ever blocked, the message's own audio stays available to replay
-  return audio
-}
-
-function MicIcon({ recording }) {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-      {recording ? (
-        <rect x="6" y="6" width="12" height="12" rx="2" fill="white" stroke="none" />
-      ) : (
-        <>
-          <rect x="9" y="2" width="6" height="12" rx="3" fill="white" stroke="none" />
-          <path d="M5 10a7 7 0 0 0 14 0" strokeLinecap="round" />
-          <path d="M12 19v3" strokeLinecap="round" />
-        </>
-      )}
-    </svg>
-  )
-}
-
-function SendIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
-      <path d="M3 20l18-8L3 4v6l12 2-12 2z" />
-    </svg>
-  )
-}
-
 export default function App() {
   const [lang, setLang] = useState(null) // null until the user picks one on the language screen
-  const [messages, setMessages] = useState([])
-  const [history, setHistory] = useState([])
   const [inputText, setInputText] = useState('')
-  const [isRecording, setIsRecording] = useState(false)
-  const [isSending, setIsSending] = useState(false)
   const [isGreeting, setIsGreeting] = useState(false)
-  const mediaRecorderRef = useRef(null)
-  const chunksRef = useRef([])
+  const [officialLinks, setOfficialLinks] = useState(null) // {service_id: {label, links: [{label, url}]}}
+  const [assistantOpenSignal, setAssistantOpenSignal] = useState(0)
+
+  // Shared hands-free voice/text hook (Phase 3 Part 2) — same one the
+  // floating assistant uses, so both surfaces get identical listening/
+  // thinking/speaking states, STOP control, and error handling instead of
+  // two separate implementations drifting apart.
+  const voice = useVoiceChat({ lang, onLanguageChange: setLang })
+
+  // Phase 3 Part 1: fetch the verified official portal links once, so "Open
+  // Official Portal" is available without needing a chat round-trip.
+  useEffect(() => {
+    fetch('/api/official-links')
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setOfficialLinks)
+      .catch(() => setOfficialLinks(null)) // silently unavailable is fine — it's a convenience shortcut, not required
+  }, [])
+
+  function openPortalUrl(url) {
+    // noopener/noreferrer: the government site never gets a handle back to
+    // this window (Phase 3 security requirement — no cross-origin access).
+    window.open(url, '_blank', 'noopener,noreferrer')
+    // Phase 3 Part 2: surface the floating companion right away, since the
+    // user is about to switch tabs to the government site and back.
+    setAssistantOpenSignal((n) => n + 1)
+  }
+
+  function openOfficialPortal(serviceId) {
+    const url = officialLinks?.[serviceId]?.links?.[0]?.url
+    if (url) openPortalUrl(url)
+  }
 
   async function chooseLanguage(code) {
     setLang(code)
@@ -80,83 +74,25 @@ export default function App() {
         body: JSON.stringify({ language: code }),
       })
       const data = await resp.json()
-      setMessages([{ role: 'assistant', text: data.reply_text, lang: data.language }])
+      voice.setMessages([{ role: 'assistant', text: data.reply_text }])
       playAudioBase64(data.audio_base64)
     } catch {
-      setMessages([{ role: 'assistant', text: 'Connection error — is the backend running?', lang: code }])
+      voice.setMessages([{ role: 'assistant', text: 'Connection error — is the backend running?', isError: true }])
     } finally {
       setIsGreeting(false)
     }
   }
 
-  async function sendText(text) {
-    if (!text.trim() || isSending) return
-    setMessages((m) => [...m, { role: 'user', text, lang: '' }])
+  function handleSend() {
+    voice.sendText(inputText)
     setInputText('')
-    setIsSending(true)
-    try {
-      const resp = await fetch('/api/chat/text', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, history, language: lang }),
-      })
-      const data = await resp.json()
-      setHistory(data.history)
-      setLang(data.language) // keep tracking language turn to turn in case it changes
-      setMessages((m) => [
-        ...m,
-        { role: 'assistant', text: data.reply_text, lang: data.language, citations: data.citations },
-      ])
-      playAudioBase64(data.audio_base64)
-    } catch {
-      setMessages((m) => [...m, { role: 'assistant', text: 'Connection error — is the backend running?', lang: '' }])
-    } finally {
-      setIsSending(false)
-    }
   }
 
-  async function toggleRecording() {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop()
-      setIsRecording(false)
-      return
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
-      chunksRef.current = []
-      recorder.ondataavailable = (e) => chunksRef.current.push(e.data)
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop())
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
-        setIsSending(true)
-        try {
-          const form = new FormData()
-          form.append('audio', blob, 'input.webm')
-          form.append('history', JSON.stringify(history))
-          const resp = await fetch('/api/chat/voice', { method: 'POST', body: form })
-          const data = await resp.json()
-          setHistory(data.history)
-          setLang(data.language) // voice always detects fresh from audio — follow whatever they actually spoke
-          setMessages((m) => [
-            ...m,
-            { role: 'user', text: data.user_text, lang: data.language },
-            { role: 'assistant', text: data.reply_text, lang: data.language, citations: data.citations },
-          ])
-          playAudioBase64(data.audio_base64)
-        } catch {
-          setMessages((m) => [...m, { role: 'assistant', text: 'Connection error — is the backend running?', lang: '' }])
-        } finally {
-          setIsSending(false)
-        }
-      }
-      recorder.start()
-      mediaRecorderRef.current = recorder
-      setIsRecording(true)
-    } catch {
-      alert('Microphone access is needed to record your answer.')
-    }
-  }
+  const statusLabel =
+    voice.status === 'listening' ? 'Listening…' :
+    voice.status === 'thinking' ? 'SEVA is thinking…' :
+    voice.status === 'speaking' ? 'SEVA is speaking…' :
+    null
 
   if (!lang) {
     return (
@@ -237,6 +173,31 @@ export default function App() {
           </div>
         </div>
 
+        {/* Phase 3: Open Official Portal — the citizen picks their service and
+            control stays entirely with them; we only open the real government
+            site in a new tab, nothing is scraped, injected, or auto-filled. */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-6">
+          <p className="text-sm font-semibold text-gray-900 mb-1">Open Official Portal</p>
+          <p className="text-xs text-gray-500 mb-3">
+            Go directly to the official government site. Seva AI never fills or submits this for you —
+            you stay fully in control of your application.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {officialLinks &&
+              Object.entries(officialLinks).map(([serviceId, entry]) => (
+                <button
+                  key={serviceId}
+                  onClick={() => openOfficialPortal(serviceId)}
+                  disabled={!entry.links?.length}
+                  className="text-sm px-4 py-2 rounded-full border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-40 font-medium"
+                >
+                  Open {entry.label} portal ↗
+                </button>
+              ))}
+            {!officialLinks && <p className="text-xs text-gray-400">Loading official links…</p>}
+          </div>
+        </div>
+
         {/* Chat card */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-6">
           <div className="flex items-start gap-3 mb-4">
@@ -249,55 +210,98 @@ export default function App() {
             </div>
           </div>
 
-          {messages.length > 0 && (
+          {voice.messages.length > 0 && (
             <div className="flex flex-col gap-3 mb-4 max-h-96 overflow-y-auto pr-1">
-              {messages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${
-                      msg.role === 'user' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-800'
-                    }`}
-                  >
-                    <p>{msg.text}</p>
-                    {msg.citations?.length > 0 && (
-                      <details className="mt-2 text-xs opacity-80">
-                        <summary className="cursor-pointer">📚 Sources</summary>
-                        <ul className="list-disc pl-4 mt-1">
-                          {msg.citations.map((c, ci) => (
-                            <li key={ci}>{c}</li>
-                          ))}
-                        </ul>
-                      </details>
-                    )}
+              {voice.messages.map((msg, i) => {
+                const portal = msg.role === 'assistant' ? extractPortalLink(msg.citations) : null
+                return (
+                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div
+                      className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${
+                        msg.role === 'user'
+                          ? 'bg-green-600 text-white'
+                          : msg.isError
+                            ? 'bg-red-50 text-red-700 border border-red-100'
+                            : 'bg-gray-100 text-gray-800'
+                      }`}
+                    >
+                      <p>{msg.text}</p>
+                      {/* Phase 3 Part 2: this specific reply grounded itself in an
+                          official portal link — surface it as a real action, not
+                          just text buried in the sources. */}
+                      {portal && (
+                        <button
+                          onClick={() => openPortalUrl(portal.url)}
+                          className="mt-2 text-xs font-semibold px-3 py-1.5 rounded-full bg-green-600 text-white hover:bg-green-700"
+                        >
+                          Open Official Portal ↗
+                        </button>
+                      )}
+                      {msg.citations?.length > 0 && (
+                        <details className="mt-2 text-xs opacity-80">
+                          <summary className="cursor-pointer">📚 Sources</summary>
+                          <ul className="list-disc pl-4 mt-1">
+                            {msg.citations.map((c, ci) => (
+                              <li key={ci}>{c}</li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
-              {isSending && <p className="text-xs text-gray-400">SEVA is thinking…</p>}
+                )
+              })}
+              {statusLabel && <p className="text-xs text-gray-400">{statusLabel}</p>}
+            </div>
+          )}
+
+          {/* Voice status + STOP — accessible, always-visible feedback */}
+          {voice.status !== 'idle' && (
+            <div className="flex items-center gap-2 mb-2" aria-live="polite">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  voice.isRecording ? 'bg-red-500 animate-pulse'
+                    : voice.isSpeaking ? 'bg-green-500 animate-pulse'
+                    : 'bg-amber-400'
+                }`}
+              />
+              <span className="text-xs text-gray-500">{statusLabel}</span>
+              {voice.isSpeaking && (
+                <button
+                  onClick={voice.stopSpeaking}
+                  aria-label="Stop Seva AI speaking"
+                  className="ml-auto flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full bg-red-50 text-red-600 hover:bg-red-100"
+                >
+                  <StopIcon size={12} /> STOP
+                </button>
+              )}
             </div>
           )}
 
           <div className="flex items-center gap-2">
             <button
-              onClick={toggleRecording}
+              onClick={voice.toggleRecording}
+              aria-label={voice.isRecording ? 'Stop recording' : 'Tap to speak'}
               className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-colors ${
-                isRecording ? 'bg-red-500 animate-pulse' : 'bg-green-600 hover:bg-green-700'
+                voice.isRecording ? 'bg-red-500 animate-pulse' : 'bg-green-600 hover:bg-green-700'
               }`}
-              title={isRecording ? 'Stop recording' : 'Record your answer'}
+              title={voice.isRecording ? 'Stop recording' : 'Tap to speak'}
             >
-              <MicIcon recording={isRecording} />
+              <MicIcon recording={voice.isRecording} />
             </button>
             <input
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && sendText(inputText)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               placeholder="Ask about driving licenses or RTO services..."
-              disabled={isRecording}
+              disabled={voice.isRecording}
+              aria-label="Type your question"
               className="flex-1 rounded-full border border-gray-200 bg-gray-50 px-4 py-2 text-sm outline-none focus:border-green-400"
             />
             <button
-              onClick={() => sendText(inputText)}
-              disabled={isSending || !inputText.trim()}
+              onClick={handleSend}
+              disabled={voice.isSending || !inputText.trim()}
               className="w-10 h-10 rounded-full bg-green-600 hover:bg-green-700 disabled:opacity-40 flex items-center justify-center shrink-0"
               title="Send"
             >
@@ -309,7 +313,7 @@ export default function App() {
             {QUICK_ACTIONS.map((qa) => (
               <button
                 key={qa.label}
-                onClick={() => sendText(qa.starter)}
+                onClick={() => voice.sendText(qa.starter)}
                 className="text-xs px-3 py-1.5 rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
               >
                 {qa.label}
@@ -318,6 +322,13 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {/* Phase 3: floating assistant — a separate, self-contained quick-help
+          panel available anywhere in the app, reusing the same backend
+          pipeline (Phase 1 RAG + Phase 2 process guidance + Phase 3 Part 2
+          language handling) as the main chat. Language switches made from
+          either surface stay in sync via onLanguageChange. */}
+      <FloatingAssistant lang={lang} onLanguageChange={setLang} openSignal={assistantOpenSignal} />
     </div>
   )
 }

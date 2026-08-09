@@ -69,8 +69,10 @@ st.divider()
 audio_value = st.audio_input("Tap to record your answer", key=f"audio_{st.session_state.turn_id}")
 if audio_value is not None:
     english_reply = user_turn_from_audio(audio_value.getvalue())
-    # service_id left unset so the hybrid RAG pipeline auto-detects the service
-    answer, citations = intelligence.respond(st.session_state.llm_history, english_reply)
+    # service_id left unset so the hybrid RAG pipeline auto-detects the service.
+    # target_lang tells the model whether to write clean English (for
+    # downstream translation) or natural Hinglish (Phase 3 Part 2).
+    answer, citations = intelligence.respond(st.session_state.llm_history, english_reply, target_lang=st.session_state.lang)
     bot_say(answer, citations=citations)
     st.session_state.turn_id += 1
     st.rerun()
